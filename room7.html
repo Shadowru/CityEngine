@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Room</title>
+    <meta charset="utf-8">
+
+</head>
+<body>
+
+<script src="node_modules/three/build/three.js"></script>
+
+<script src="node_modules/three/examples/js/loaders/GLTFLoader.js"></script>
+
+<script src="node_modules/three/examples/js/vr/WebVR.js"></script>
+<script src="node_modules/three/examples/js/libs/stats.min.js"></script>
+
+
+<script>
+
+    var stats = new Stats();
+    stats.showPanel(0);
+    //document.body.appendChild(stats.dom);
+
+    const roomSize = 20;
+
+    var renderer, scene, camera;
+
+    init();
+    animate();
+
+    function loadModel(scene) {
+        const scale = 0.35;//0.6;//0.04;
+
+        var loader = new THREE.GLTFLoader();
+
+        loader.load(
+            // resource URL
+            'assets/models/pavillion/scene.glb',
+            // called when the resource is loaded
+            function (gltf) {
+                gltf.scene.scale.set(scale, scale, scale);
+
+                //gltf.scene.rotation.y = Math.PI * 1.31;
+                gltf.scene.position.set(0, +0.3, 0);
+                scene.add(gltf.scene);
+            }
+        );
+    }
+
+    function setupScene(scene) {
+        var grid = new THREE.GridHelper(roomSize, 20, 'red', 'red');
+        grid.material.opacity = 0.2;
+        grid.material.transparent = true;
+
+        scene.add(grid);
+    }
+
+    function getInfo(renderer) {
+        try {
+            var ctx = renderer.getContext();
+            var info = renderer.extensions.get("WEBGL_debug_renderer_info");
+            console.log(ctx.getParameter(ctx.VENDOR));
+            console.log(ctx.getParameter(ctx.RENDERER));
+            console.log(ctx.getParameter(info.UNMASKED_VENDOR_WEBGL));
+            console.log(ctx.getParameter(info.UNMASKED_RENDERER_WEBGL));
+        } catch (e) {
+            console.log(e);
+        }
+    }
+
+    function setupLight(scene) {
+
+        var light = new THREE.AmbientLight( 0xffffff, 4); // soft white light
+        scene.add( light );
+
+    }
+
+    function init() {
+
+        container = document.createElement('div');
+        document.body.appendChild(container);
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xffffff);
+
+        camera = new THREE.PerspectiveCamera(110, window.innerWidth / window.innerHeight, 0.1, 2000000);
+
+        camera.position.set(0, 1.8, 0);
+
+        scene.add(camera);
+
+        setupLight(scene);
+        scene.background = new THREE.CubeTextureLoader()
+            .setPath( './assets/textures/cube/Park2/' )
+            .load( [
+                'posx.jpg',
+                'negx.jpg',
+                'posy.jpg',
+                'negy.jpg',
+                'posz.jpg',
+                'negz.jpg'
+            ] );
+
+        setupScene(scene);
+
+        loadModel(scene);
+
+        renderer = new THREE.WebGLRenderer({antialias: true});
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.gammaInput = true;
+        renderer.gammaOutput = true;
+
+        getInfo(renderer);
+
+        renderer.vr.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        window.addEventListener('resize', onWindowResize, false);
+
+        document.body.appendChild(WEBVR.createButton(renderer));
+
+
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+    }
+
+    function animate() {
+        renderer.setAnimationLoop(render);
+    }
+
+    function render() {
+        stats.begin();
+        try {
+
+            renderer.render(scene, camera);
+
+        } catch (e) {
+            console.log(e);
+        }
+        stats.end();
+    }
+</script>
+
+</body>
+</html>

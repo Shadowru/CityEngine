@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+
+<script src="node_modules/three/build/three.js"></script>
+<script src="node_modules/three/examples/js/loaders/GLTFLoader.js"></script>
+<script src="node_modules/three/examples/js/objects/Water2.js"></script>
+
+<script src="node_modules/three/examples/js/shaders/CopyShader.js"></script>
+
+<script src="node_modules/three/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="node_modules/three/examples/js/postprocessing/SSAARenderPass.js"></script>
+<script src="node_modules/three/examples/js/postprocessing/RenderPass.js"></script>
+<script src="node_modules/three/examples/js/postprocessing/MaskPass.js"></script>
+<script src="node_modules/three/examples/js/postprocessing/ShaderPass.js"></script>
+
+<script src="node_modules/three/examples/js/loaders/SVGLoader.js"></script>
+
+<script src="node_modules/three/examples/js/libs/stats.min.js"></script>
+<script src="node_modules/three/examples/js/controls/OrbitControls.js"></script>
+
+<script src="node_modules/threejs-slice-geometry/build/slice.js"></script>
+
+<script src="js/RendererStats.js"></script>
+
+<script src="node_modules/@turf/turf/turf.js"></script>
+<script src="node_modules/earcut/dist/earcut.dev.js"></script>
+<script src="node_modules/simplify-js/simplify.js"></script>
+
+<script src="js/ObjectivityCity.js"></script>
+
+<script>
+
+    const NEAR = 1, FAR = 8192;
+
+    let can_render = false;
+
+
+    function buildingsStyle(feature) {
+
+        //console.log(feature);
+        var color = 'white';
+
+        if (feature.properties.color) {
+            color = feature.properties.color;//parseInt('0x' + feature.properties.color.substring(1));
+        }
+
+        const feature_class = feature.properties.kind;//class;
+
+        if (feature.id === 0) {
+            color = 'blue';
+        }
+        var height = 0;
+
+        if (feature.properties.height) {
+            height = feature.properties.height;
+        } else if (feature.properties.levels) {
+            height = feature.properties.levels * 4;
+        } else {
+            switch (feature_class) {
+                case 'bridge':
+                    height = 5;
+                    break;
+                case 'riverbank':
+                case 'river':
+                case 'stream':
+                    //height = 1;
+                    color = 'blue';
+                    break;
+                case 'wood':
+                case 'natural_wood':
+                    height = 2;
+                    color = '#5B9633';
+                    break;
+                case 'grass':
+                    height = 1;
+                    color = '#7cfc00';
+                    break;
+                default:
+                    color = 'gray';
+            }
+        }
+
+        const material = feature.properties.building_material;
+
+        switch (material) {
+            case 'brick':
+                color = 'red';
+                break;
+            case 'glass':
+                color = '#a8ccd7';
+                break;
+        }
+
+        const roof_material = feature.properties.roof_material;
+
+        switch (roof_material) {
+            case 'glass':
+                color = '#a8ccd7';
+                break;
+        }
+
+        var defaultStyle = {
+            height: height,
+            color: color
+        };
+
+        if (feature.properties.id === -3427805) {
+            console.log('height :' + JSON.stringify(defaultStyle));
+        }
+
+        return defaultStyle;
+    }
+
+    function makeGeoJSONLayer(url, style_function) {
+
+        var geoJSONLayer = ObjectivityCity.geoJSONLayer(url,
+            {
+                output: true,
+                style: style_function
+            }
+        );
+
+        return geoJSONLayer;
+    }
+
+    function loadBuilding(building_point, building_state, model_url, scene) {
+
+        var loader = new THREE.GLTFLoader();
+
+        function getModelDimensions(building) {
+            let minX = Number.MAX_SAFE_INTEGER;
+            let minY = Number.MAX_SAFE_INTEGER;
+            let minZ = Number.MAX_SAFE_INTEGER;
+
+            let maxX = Number.MIN_SAFE_INTEGER;
+            let maxY = Number.MIN_SAFE_INTEGER;
+            let maxZ = Number.MIN_SAFE_INTEGER;
+
+            if (building instanceof THREE.Object3D) {
+                building.traverse(function (mesh) {
+                    if (mesh instanceof THREE.Mesh) {
+                        mesh.geometry.computeBoundingBox();
+                        var bBox = mesh.geometry.boundingBox;
+
+                        // compute overall bbox
+                        minX = Math.min(minX, bBox.min.x);
+                        minY = Math.min(minY, bBox.min.y);
+                        minZ = Math.min(minZ, bBox.min.z);
+                        maxX = Math.max(maxX, bBox.max.x);
+                        maxY = Math.max(maxY, bBox.max.y);
+                        maxZ = Math.max(maxZ, bBox.max.z);
+                    }
+                });
+
+            }
+            return {
+                "minX": minX,
+                "minY": minY,
+                "minZ": minZ,
+                "maxX": maxX,
+                "maxY": maxY,
+                "maxZ": maxZ
+            }
+        }
+
+        loader.load(
+            // resource URL
+            model_url,
+            // called when the resource is loaded
+            function (gltf) {
+                const building = gltf.scene;
+
+                const model_dimensions = getModelDimensions(building.children[0]);
+
+                console.log('model_dimensions : ' + JSON.stringify(model_dimensions));
+
+                const modelHeight = model_dimensions.maxY - model_dimensions.minY;
+                const model_scale = building_state.height / modelHeight;
+
+                console.log('model_scale : ' + model_scale);
+
+                building.scale.set(model_scale, model_scale, model_scale);
+                building.rotation.set(building_state.rotate[0], building_state.rotate[1], building_state.rotate[2]);
+                //building.rotation.y(building_state.rotate[0], building_state.rotate[1], building_state.rotate[2]);
+                building.position.set(building_point.x, 0, building_point.y);
+
+                scene.add(building);
+            }
+        );
+
+
+    }
+
+    function loadDetailedBuildings(buildings_url, scene, objectivityCity) {
+
+        var buildings_file_loader = new THREE.FileLoader();
+
+        buildings_file_loader.load(
+            // resource URL
+            buildings_url,
+
+            // onLoad callback
+            function (data) {
+                // output the text to the console
+                const detailed_buildings = JSON.parse(data);
+                for (const feature of detailed_buildings.features) {
+
+                    const properties = feature.properties;
+
+                    const building_coordinate = {
+                        lon: properties.coordinate[1],
+                        lat: properties.coordinate[0]
+                    };
+
+                    const building_point = objectivityCity.latLonToPoint(building_coordinate);
+
+                    const pointScale = ObjectivityCity.World.pointScale(building_coordinate);
+                    const building_state = {
+                        height: objectivityCity.metresToWorld(properties.height, pointScale),
+                        rotate: properties.transform.rotate
+                    };
+
+                    console.log('building_point : ' + JSON.stringify(building_point));
+                    console.log('building_state : ' + JSON.stringify(building_state));
+
+                    loadBuilding(building_point, building_state, feature.model, scene);
+
+                }
+            },
+
+            // onProgress callback
+            function (xhr) {
+                console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+            },
+
+            // onError callback
+            function (err) {
+                console.error('An error happened');
+            }
+        );
+
+    }
+
+    function makeMapLayer(mapURL) {
+        var flatMapLayer = ObjectivityCity.flatMapLayer(mapURL,
+            {
+                output: true,
+                farPlane: FAR
+            }
+        );
+
+        return flatMapLayer;
+    }
+
+
+    function addTerrainLayer2(objectivityCity, tile, finish_callback) {
+
+        const loader = new THREE.TextureLoader();
+
+        loader.load(tile.tileTexture, function onLoad(texture) {
+
+            texture.flipY = false;
+
+            texture.minFilter = THREE.LinearFilter;
+            texture.magFilter = THREE.LinearFilter;
+
+            let material = new THREE.MeshBasicMaterial({
+                map: texture,
+                side: THREE.DoubleSide
+            });
+
+            let topLeftPoint = objectivityCity.latLonToPoint({lon: tile.tileLon[0], lat: tile.tileLat[0]});
+            let bottomRightPoint = objectivityCity.latLonToPoint({lon: tile.tileLon[1], lat: tile.tileLat[1]});
+            let width = Math.abs(bottomRightPoint.x - topLeftPoint.x);
+            let height = Math.abs(bottomRightPoint.y - topLeftPoint.y);
+
+            objectivityCity.addLayer(
+                addTerrainLayer(
+                    {
+                        url: tile.tileGEOJSON,
+                        coord: topLeftPoint,
+                        width: width,
+                        height: height
+                    },
+                    material
+                )
+            );
+
+            finish_callback();
+        });
+
+    }
+
+    function rrr(feature) {
+        //console.log(feature);
+        var color;
+
+        if (feature.properties.color) {
+            color = feature.properties.color;//parseInt('0x' + feature.properties.color.substring(1));
+        } else {
+            color = 'gray';//0xf7c616;//0x0fe7f2;// Math.random() * 0xffffff;
+        }
+        var height = 0;//height = 10 + Math.random() * 10;
+        if (feature.properties.height) {
+            height = feature.properties.height;
+        } else if (feature.properties.levels) {
+            height = feature.properties.levels * 4;
+        }
+
+        var defaultStyle = {
+            height: height
+        };
+
+
+        var materialStyle = {color: color};
+
+        return Object.assign({}, defaultStyle, materialStyle);
+
+    }
+
+
+    function addTerrainLayer(tile, material) {
+
+        //console.log('tile : ' + JSON.stringify(tile));
+
+        tile.material = material;
+
+        var geoJSONLayer = ObjectivityCity.geoJSONLayer(
+            tile.url,
+            {
+                output: true,
+                style: buildingsStyle
+            },
+            tile
+        );
+
+        return geoJSONLayer;
+    }
+
+    function initCity2(coords, scene, scale) {
+
+        var objectivityCity = ObjectivityCity.world('Moscow',
+            {
+                postprocessing: false,
+                scale: scale
+            }
+        );
+
+        objectivityCity.setCoordinateSystem('ESPG');
+        objectivityCity.setCoordinates(coords);
+
+        camera.position.y = objectivityCity.metresToWorld(1000, ObjectivityCity.World.pointScale({
+            lat: coords[0],
+            lon: coords[1]
+        }));
+        //camera.position.z = 0;
+
+        //initMaterials(objectivityCity);
+
+        //objectivityCity.addLayer(makeMapLayer('assets/map/1/'));
+        //objectivityCity.addLayer(addLayer('assets/mapbox.json', terrainStyle));
+        //objectivityCity.addLayer(makeGeoJSONLayer('assets/buildings.json', buildingsStyle));
+        //objectivityCity.addLayer(makeGeoJSONLayer('assets/vector_tiles_buildings.json', buildingsStyle));
+        //objectivityCity.addLayer(makeGeoJSONLayer('assets/vector_tiles_nextzen.json', buildingsStyle));
+
+        /*
+
+        for (const featureMapElement of featureMap) {
+            console.log(featureMapElement);
+        }
+*/
+
+        function tile2long(x, z) {
+            return (x / Math.pow(2, z) * 360 - 180);
+        }
+
+        function tile2lat(y, z) {
+            var n = Math.PI - 2 * Math.PI * y / Math.pow(2, z);
+            return (180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))));
+        }
+
+        var loader = new THREE.FileLoader();
+
+        loader.load(
+            // resource URL
+            'assets/map/map.json',
+
+            // onLoad callback
+            function (data) {
+                // output the text to the console
+                console.log(data);
+
+                const map_json = JSON.parse(data);
+
+                const boundingBox = map_json.bbox;
+
+                counter = map_json.width * map_json.height;
+
+                for (let x = boundingBox.minX; x < boundingBox.maxX; x++) {
+
+                    for (let y = boundingBox.minY; y < boundingBox.maxY; y++) {
+
+                        //        objectivityCity.addLayer(addTerrainLayer('assets/map/mappart/13-4951-2560.json'));
+                        addTerrainLayer2(
+                            objectivityCity,
+                            {
+                                tileLon: [tile2long(x, map_json.zoom), tile2long(x + 1, map_json.zoom)],
+                                tileLat: [tile2lat(y, map_json.zoom), tile2lat(y + 1, map_json.zoom)],
+                                tileGEOJSON: 'assets/map/map_part/' + x + '_' + y + '_' + map_json.zoom + '.json',
+                                tileTexture: 'assets/map/map_part/' + x + '_' + y + '_' + map_json.zoom + '.png'
+                            },
+                            function () {
+                                if (--counter <= 0) {
+                                    can_render = true;
+                                }
+                            }
+                        );
+
+                    }
+
+                }
+
+            },
+
+            // onProgress callback
+            function (xhr) {
+                //console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+            },
+
+            // onError callback
+            function (err) {
+                console.error('An error happened');
+            }
+        );
+
+
+        var cityObject = objectivityCity.getObject3D();
+
+        scene.add(cityObject);
+
+        //loadDetailedBuildings("./assets/buildings/detailed_buildings.json", scene, objectivityCity);
+
+    }
+
+    var camera, scene, renderer;
+
+    var stats = new Stats();
+    stats.showPanel(0);
+    document.body.appendChild(stats.dom);
+
+    const rendererStats = new RendererStats();
+
+    rendererStats.domElement.style.position = 'absolute';
+    rendererStats.domElement.style.left = '0px';
+    rendererStats.domElement.style.bottom = '0px';
+    document.body.appendChild(rendererStats.domElement);
+
+    init();
+    animate();
+
+    function loadCityModel(scene, model_url) {
+        var loader = new THREE.GLTFLoader();
+
+        // Load a glTF resource
+        loader.load(
+            // resource URL
+            model_url,
+            // called when the resource is loaded
+            function ( gltf ) {
+
+                scene.add( gltf.scene );
+
+            },
+            // called while loading is progressing
+            function ( xhr ) {
+
+                console.log( ( xhr.loaded / xhr.total * 100 ) + '% loaded' );
+
+            },
+            // called when loading has errors
+            function ( error ) {
+
+                console.log( 'An error happened' );
+
+            }
+        );
+    }
+
+    function initScene(scene) {
+        var light = new THREE.AmbientLight(0x404040, 3); // soft white light
+        scene.add(light);
+
+        var light = new THREE.HemisphereLight(0xffffbb, 0x080820, 2);
+        scene.add(light);
+
+        //addClouds(scene);
+
+        var coords = [55.745476, 37.603611];
+        //var coords = [40.75083, -73.98417];
+       // initCity2(coords, scene, 0.15);
+
+        loadCityModel(scene, "./assets/mvt_plane_scene.gltf");
+    }
+
+    function init() {
+
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, NEAR, FAR);
+        camera.position.z = 400;
+        scene = new THREE.Scene();
+
+        initScene(scene);
+
+        renderer = new THREE.WebGLRenderer({antialias: true});
+
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        document.body.appendChild(renderer.domElement);
+        var controls = new THREE.OrbitControls(camera, renderer.domElement);
+        renderer.gammaInput = true;
+        renderer.gammaOutput = true;
+
+        // postprocessing
+        /*
+                composer = new THREE.EffectComposer( renderer );
+                ssaaRenderPass = new THREE.SSAARenderPass( scene, camera );
+                ssaaRenderPass.unbiased = true;
+                composer.addPass( ssaaRenderPass );
+                copyPass = new THREE.ShaderPass( THREE.CopyShader );
+                copyPass.renderToScreen = true;
+                composer.addPass( copyPass );
+
+                ssaaRenderPass.sampleLevel = 4;
+        */
+        window.addEventListener('resize', onWindowResize, false);
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        /*
+        var pixelRatio = renderer.getPixelRatio();
+        var newWidth = Math.floor(width / pixelRatio) || 1;
+        var newHeight = Math.floor(height / pixelRatio) || 1;
+        composer.setSize(newWidth, newHeight);
+        */
+    }
+
+    function animate() {
+        if (can_render) {
+            rendererStats.update(renderer);
+            stats.begin();
+            renderer.render(scene, camera);
+            //composer.render();
+            stats.end();
+        }
+        requestAnimationFrame(animate);
+    }
+
+
+</script>
+
+</body>
+</html>

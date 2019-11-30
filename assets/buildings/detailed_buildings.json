@@ -1,0 +1,59 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "GLBModel",
+      "model": "./assets/buildings/PalaceOfSoviets2.glb",
+      "properties": {
+        "height": 250,
+        "coordinate": [
+          55.744605,
+          37.605454
+        ],
+        "transform": {
+          "rotate": [
+            0,
+            4.1154863762,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "type": "GLBModel",
+      "model": "./assets/buildings/MFA.glb",
+      "properties": {
+        "height": 750,
+        "coordinate": [
+          55.746135,
+          37.584625
+        ],
+        "transform": {
+          "rotate": [
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    }
+//    {
+//      "type": "GLBModel",
+//      "model": "./assets/buildings/Gostorg.glb",
+//      "properties": {
+//        "height": 60,
+//        "coordinate": [
+//          55.745203,
+//          37.602852
+//        ],
+//        "transform": {
+//          "rotate": [
+//            0,
+//            0,
+//            0
+//          ]
+//        }
+//      }
+//    }
+  ]
+}

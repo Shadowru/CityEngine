@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<script src="node_modules/three/build/three.js"></script>
+
+<script src="node_modules/three/examples/js/loaders/GLTFLoader.js"></script>
+
+<script src="node_modules/three/examples/js/vr/WebVR.js"></script>
+
+<script src="node_modules/three/examples/js/objects/Sky.js"></script>
+
+<script src="node_modules/@turf/turf/turf.js"></script>
+<script src="node_modules/earcut/dist/earcut.dev.js"></script>
+<script src="node_modules/simplify-js/simplify.js"></script>
+
+<script src="js/ObjectivityCity.js"></script>
+
+<script src="node_modules/three/examples/js/libs/stats.min.js"></script>
+
+
+<script>
+
+    /*
+    var stats = new Stats();
+    stats.showPanel(0);
+    document.body.appendChild(stats.dom);
+*/
+    const distance = 400000;
+    const sunLightDistance = 206;
+
+    var light, directionalLight, helper;
+
+    init();
+    animate();
+
+    function setLightCoords(theta, phi) {
+        const xDelta = Math.cos(phi);
+        const yDelta = Math.sin(phi) * Math.sin(theta);
+        const zDelta = Math.sin(phi) * Math.cos(theta);
+
+        sunSphere.position.x = distance * xDelta;
+        sunSphere.position.y = distance * yDelta;
+        sunSphere.position.z = distance * zDelta;
+
+        var targetObject = new THREE.Object3D();
+        scene.add(targetObject);
+
+        //light
+        light = new THREE.HemisphereLight(0xffffff, 0x444444, 0.3);
+        light.position.set(sunLightDistance * xDelta, sunLightDistance * yDelta, sunLightDistance * zDelta);
+        light.target = targetObject;
+        scene.add(light);
+
+        directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(sunLightDistance * xDelta, sunLightDistance * yDelta, sunLightDistance * zDelta);
+        directionalLight.target = targetObject;
+
+        //helper = new THREE.DirectionalLightHelper( directionalLight, 5 );
+
+        scene.add(directionalLight);
+        //scene.add(helper);
+
+        /*
+        directionalLight.castShadow = true;
+        directionalLight.shadow = new THREE.LightShadow(new THREE.PerspectiveCamera(75, 1, 1200, 2500));
+        directionalLight.shadow.bias = 0.001;
+        directionalLight.shadow.mapSize.width = SHADOW_MAP_WIDTH;
+        directionalLight.shadow.mapSize.height = SHADOW_MAP_HEIGHT;
+*/
+        const angle = Math.PI;
+
+        //helper.rotation.z = angle;
+
+        //sunSphere.rotation.y = angle;
+        //directionalLight.rotation.y = angle;
+        //light.rotation.y = angle;
+    }
+
+    function setupSky(scene) {
+
+
+        // Add Sky
+        sky = new THREE.Sky();
+        sky.scale.setScalar(450000);
+        scene.add(sky);
+        // Add Sun Helper
+        sunSphere = new THREE.Mesh(
+            new THREE.SphereBufferGeometry(20000, 16, 8),
+            new THREE.MeshBasicMaterial({color: 0xffffff})
+        );
+        sunSphere.position.y = -700000;
+        sunSphere.visible = false;
+        scene.add(sunSphere);
+
+
+        var uniforms = sky.material.uniforms;
+        uniforms.turbidity.value = 10;//effectController.turbidity;
+        uniforms.rayleigh.value = 2;//effectController.rayleigh;
+        uniforms.luminance.value = 1.1;//effectController.luminance;
+        uniforms.mieCoefficient.value = 0.005;//effectController.mieCoefficient;
+        uniforms.mieDirectionalG.value = 0.8;//effectController.mieDirectionalG;
+
+        var inclination = 0.0196;
+        var azimuth = 0.1822;
+
+        var theta = Math.PI * (inclination - 0.5);
+        var phi = 2 * Math.PI * (azimuth - 0.5);
+
+        setLightCoords(theta, phi);
+
+        sunSphere.visible = true;//effectController.sun;
+
+        uniforms.sunPosition.value.copy(sunSphere.position);
+
+
+    }
+
+    function addMap(scene, objectivityCity) {
+
+        const getTextures = () => new Promise((resolve, reject) => {
+            const loader = new THREE.TextureLoader();
+            THREE.DefaultLoadingManager.onLoad = () => resolve(textures);
+            const textures = [
+                'assets/textures/map.png'
+            ].map(filename => loader.load(filename));
+        });
+
+
+        getTextures().then(result => {
+
+            var patternTextures = result;
+
+            var patternTexture = patternTextures[0];
+            var maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+
+            patternTexture.anisotropy = maxAnisotropy;
+            patternTexture.wrapS = patternTexture.wrapT = THREE.RepeatWrapping;
+            patternTexture.offset.set(0, 0);
+            patternTexture.repeat.set(1, 1);
+
+            var patternMaterial = new THREE.MeshBasicMaterial({
+                map: patternTexture,
+//                side: THREE.DoubleSide
+            });
+
+            /*            const north_edge = 55.7588;
+                        const west_edge = 37.5814;
+                        const south_edge = 55.7378;
+                        const east_edge = 37.6380;
+            */
+            const north_edge = 55.75803176823724;
+            const west_edge = 37.580108642578125;
+            const south_edge = 55.737935461409336;
+            const east_edge = 37.637786865234375;
+
+            let topLeftPoint = objectivityCity.latLonToPoint({lon: west_edge, lat: north_edge});
+            let bottomRightPoint = objectivityCity.latLonToPoint({lon: east_edge, lat: south_edge});
+
+            console.log(topLeftPoint);
+            console.log(bottomRightPoint);
+
+            var planeGeometry = new THREE.PlaneGeometry(1, 1, 1, 1);
+
+            const depth = 0.02;
+
+            planeGeometry.vertices[0].x = topLeftPoint.x;
+            planeGeometry.vertices[0].y = topLeftPoint.y;
+            planeGeometry.vertices[0].z = depth;
+
+            planeGeometry.vertices[1].x = bottomRightPoint.x;
+            planeGeometry.vertices[1].y = topLeftPoint.y;
+            planeGeometry.vertices[1].z = depth;
+
+            planeGeometry.vertices[2].x = topLeftPoint.x;
+            planeGeometry.vertices[2].y = bottomRightPoint.y;
+            planeGeometry.vertices[2].z = depth;
+
+            planeGeometry.vertices[3].x = bottomRightPoint.x;
+            planeGeometry.vertices[3].y = bottomRightPoint.y;
+            planeGeometry.vertices[3].z = depth;
+
+            var plane = new THREE.Mesh(planeGeometry, patternMaterial);
+            //plane.position.set(0, -0.3, 0);
+            plane.rotation.x = Math.PI / 2;
+
+            scene.add(plane);
+
+        });
+
+    }
+
+    function terrainStyle(feature) {
+
+        function getFeatureClass(properties) {
+            const layer = properties.vt_layer;
+            if (layer === 'water') {
+                return layer;
+            } else if (layer === 'landuse') {
+                return properties.type;
+            }
+        }
+
+        var defaultStyle = {
+            height: 0
+        };
+
+        let color = 'navy';
+        let opacity = '1';
+        let transparent = 'false';
+
+        const properties = feature.properties;
+
+        const terrain_class = getFeatureClass(properties);
+
+        switch (terrain_class) {
+            case 'water':
+                color = 'navy';
+                transparent = true;
+                opacity = '0.5';
+                break;
+            case 'wood':
+                color = '#5B9633';
+                break;
+            case 'grass':
+                color = '#7cfc00';
+                break;
+        }
+
+        var materialStyle = {
+            color: color,
+            opacity: opacity,
+            transparent: transparent
+        };
+
+        return Object.assign({}, defaultStyle, materialStyle);
+    }
+
+    function buildingsStyle(feature) {
+        //console.log(feature);
+        var color = 'white';
+
+        if (feature.properties.color) {
+            color = feature.properties.color;//parseInt('0x' + feature.properties.color.substring(1));
+        }
+
+        var height = 10 + Math.random() * 10;
+
+        if (feature.properties.height) {
+            height = feature.properties.height;
+        } else if (feature.properties.level) {
+            height = feature.properties.level * 10;
+        }
+
+        var defaultStyle = {
+            height: height
+        };
+
+        var materialStyle = {color: color};
+
+        return Object.assign({}, defaultStyle, materialStyle);
+    }
+
+    function addLayer(url, style_function) {
+
+        var geoJSONLayer = ObjectivityCity.geoJSONLayer(url,
+            {
+                output: true,
+                style: style_function
+            }
+        );
+
+        return geoJSONLayer;
+    }
+
+    function loadBuilding(building_point, building_state, model_url, scene) {
+
+        var loader = new THREE.GLTFLoader();
+
+        function getModelDimensions(building) {
+            let minX = Number.MAX_SAFE_INTEGER;
+            let minY = Number.MAX_SAFE_INTEGER;
+            let minZ = Number.MAX_SAFE_INTEGER;
+
+            let maxX = Number.MIN_SAFE_INTEGER;
+            let maxY = Number.MIN_SAFE_INTEGER;
+            let maxZ = Number.MIN_SAFE_INTEGER;
+
+            if (building instanceof THREE.Object3D) {
+                building.traverse(function (mesh) {
+                    if (mesh instanceof THREE.Mesh) {
+                        mesh.geometry.computeBoundingBox();
+                        var bBox = mesh.geometry.boundingBox;
+
+                        // compute overall bbox
+                        minX = Math.min(minX, bBox.min.x);
+                        minY = Math.min(minY, bBox.min.y);
+                        minZ = Math.min(minZ, bBox.min.z);
+                        maxX = Math.max(maxX, bBox.max.x);
+                        maxY = Math.max(maxY, bBox.max.y);
+                        maxZ = Math.max(maxZ, bBox.max.z);
+                    }
+                });
+
+            }
+            return {
+                "minX": minX,
+                "minY": minY,
+                "minZ": minZ,
+                "maxX": maxX,
+                "maxY": maxY,
+                "maxZ": maxZ
+            }
+        }
+
+        loader.load(
+            // resource URL
+            model_url,
+            // called when the resource is loaded
+            function (gltf) {
+                const building = gltf.scene;
+
+                const model_dimensions = getModelDimensions(building.children[0]);
+
+                console.log('model_dimensions : ' + JSON.stringify(model_dimensions));
+
+                const modelHeight = model_dimensions.maxY - model_dimensions.minY;
+                const model_scale = building_state.height / modelHeight;
+
+                console.log('model_scale : ' + model_scale);
+
+                building.scale.set(model_scale, model_scale, model_scale);
+                building.rotation.set(building_state.rotate[0], building_state.rotate[1], building_state.rotate[2]);
+                //building.rotation.y(building_state.rotate[0], building_state.rotate[1], building_state.rotate[2]);
+                building.position.set(building_point.x, 0, building_point.y);
+
+                scene.add(building);
+            }
+        );
+
+
+    }
+
+    function loadDetailedBuildings(buildings_url, scene, objectivityCity) {
+
+        var buildings_file_loader = new THREE.FileLoader();
+
+        buildings_file_loader.load(
+            // resource URL
+            buildings_url,
+
+            // onLoad callback
+            function (data) {
+                // output the text to the console
+                const detailed_buildings = JSON.parse(data);
+                for (const feature of detailed_buildings.features) {
+
+                    const properties = feature.properties;
+
+                    const building_coordinate = {
+                        lon: properties.coordinate[1],
+                        lat: properties.coordinate[0]
+                    };
+
+                    const building_point = objectivityCity.latLonToPoint(building_coordinate);
+
+                    const pointScale = ObjectivityCity.World.pointScale(building_coordinate);
+                    const building_state = {
+                        height: objectivityCity.metresToWorld(properties.height, pointScale),
+                        rotate: properties.transform.rotate
+                    };
+
+                    console.log('building_point : ' + JSON.stringify(building_point));
+                    console.log('building_state : ' + JSON.stringify(building_state));
+
+                    loadBuilding(building_point, building_state, feature.model, scene);
+
+                }
+            },
+
+            // onProgress callback
+            function (xhr) {
+                console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+            },
+
+            // onError callback
+            function (err) {
+                console.error('An error happened');
+            }
+        );
+
+    }
+
+    function initCity2(coords, scene, scale) {
+
+        var objectivityCity = ObjectivityCity.world('Moscow',
+            {
+                postprocessing: false,
+                scale: scale
+            }
+        );
+
+        objectivityCity.setCoordinateSystem('ESPG');
+        objectivityCity.setCoordinates(coords);
+
+        //initMaterials(objectivityCity);
+
+        addMap(scene, objectivityCity);
+        //objectivityCity.addLayer(addLayer('assets/mapbox.json', terrainStyle));
+        objectivityCity.addLayer(addLayer('assets/buildings.json', buildingsStyle));
+
+        var cityObject = objectivityCity.getObject3D();
+
+        scene.add(cityObject);
+
+        loadDetailedBuildings("./assets/buildings/detailed_buildings.json", scene, objectivityCity);
+
+    }
+
+
+    function init() {
+
+        container = document.createElement('div');
+        document.body.appendChild(container);
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xffffff);
+
+        camera = new THREE.PerspectiveCamera(110, window.innerWidth / window.innerHeight, 0.1, 2000000);
+
+        camera.position.set(0, 1.8, 0);
+
+        scene.add(camera);
+
+        setupSky(scene);
+
+        const coords = [55.746883, 37.588389];
+        const sceneScale = 0.03;
+
+        initCity2(coords, scene, sceneScale);
+
+        renderer = new THREE.WebGLRenderer({antialias: true});
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        renderer.gammaInput = true;
+        renderer.gammaOutput = true;
+
+        // renderer.shadowMap.enabled = true;
+        // renderer.shadowMap.type = THREE.PCFShadowMap;
+
+
+        renderer.vr.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        window.addEventListener('resize', onWindowResize, false);
+
+        document.body.appendChild(WEBVR.createButton(renderer));
+
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+        renderer.setAnimationLoop(render);
+    }
+
+    function render() {
+        //  stats.begin();
+        try {
+            renderer.render(scene, camera);
+        } catch (e) {
+            console.log(e);
+        }
+        //  stats.end();
+    }
+</script>
+</body>
+</html>
